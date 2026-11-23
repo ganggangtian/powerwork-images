@@ -1,0 +1,86 @@
+name: ${POWERXI_INSTANCE_NAME:?Set POWERXI_INSTANCE_NAME}
+
+x-platform: &platform
+  image: ${POWERXI_IMAGE:?Set POWERXI_IMAGE}
+
+services:
+  prepare:
+    <<: *platform
+    user: root
+    entrypoint: [flock, -x, /config/.prepare.lock]
+    command: [bun, --no-env-file, runtime/instance.js, prepare]
+    environment:
+      POWERXI_INSTANCE_NAME: ${POWERXI_INSTANCE_NAME:?Set POWERXI_INSTANCE_NAME}
+      POWERXI_PUBLIC_ORIGIN: ${POWERXI_PUBLIC_ORIGIN:?Set POWERXI_PUBLIC_ORIGIN}
+      POWERXI_PRODUCT_URL: ${POWERXI_PRODUCT_URL:-}
+      POWERXI_PRODUCT_HOME: ${POWERXI_PRODUCT_HOME:-/}
+      POWERXI_PRODUCT_NAME: ${POWERXI_PRODUCT_NAME:-}
+    volumes:
+      - config:/config
+      - data:/data
+      - pg-config:/pg-config
+      - s3-config:/s3-config
+    network_mode: none
+  postgres:
+    image: ${POWERXI_POSTGRES_IMAGE:-pgvector/pgvector:pg17}
+    depends_on:
+      prepare: {condition: service_completed_successfully}
+    environment:
+      POSTGRES_PASSWORD_FILE: /pg-config/password
+    volumes:
+      - database:/var/lib/postgresql/data
+      - pg-config:/pg-config:ro
+    networks: [data]
+    restart: unless-stopped
+  storage:
+    image: ${POWERXI_STORAGE_IMAGE:-chrislusf/seaweedfs:4.35}
+    depends_on:
+      prepare: {condition: service_completed_successfully}
+    command: [server, -dir=/data, -s3, -s3.port=9000, -s3.config=/s3-config/s3.json, -volume.max=100]
+    volumes:
+      - objects:/data
+      - s3-config:/s3-config:ro
+    networks: [data]
+    restart: unless-stopped
+  provision:
+    <<: *platform
+    entrypoint: [flock, -x, /config/.provision.lock]
+    command: [bun, --no-env-file, runtime/instance.js, provision]
+    depends_on:
+      postgres: {condition: service_started}
+      storage: {condition: service_started}
+    volumes:
+      - config:/config
+    networks: [data]
+  platform:
+    <<: *platform
+    init: true
+    depends_on:
+      provision: {condition: service_completed_successfully}
+    volumes:
+      - config:/config
+      - data:/data
+    networks: [frontend, data]
+    ports:
+      - "${POWERXI_BIND_ADDRESS:-127.0.0.1}:${POWERXI_HOST_PORT:?Set POWERXI_HOST_PORT}:4100"
+    healthcheck:
+      test: [CMD, bun, --no-env-file, runtime/instance.js, health]
+      interval: 10s
+      timeout: 3s
+      start_period: 3m
+      retries: 5
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  config: {}
+  data: {}
+  pg-config: {}
+  s3-config: {}
+  database: {}
+  objects: {}
+
+networks:
+  frontend: {}
+  data:
+    internal: true

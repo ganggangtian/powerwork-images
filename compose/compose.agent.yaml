@@ -1,0 +1,55 @@
+services:
+  prepare:
+    volumes:
+      - agent-config:/agent-config
+  provision:
+    volumes:
+      - data:/data
+      - agent-config:/agent-config
+  platform:
+    command: [bun, --no-env-file, --no-orphans, runtime/deployment.js, start, --file, /config/bundle/runtime.env, --external-agent, 'http://agent:4105']
+  agent:
+    image: ${POWERXI_IMAGE:?Set POWERXI_IMAGE}
+    command: [bun, --no-env-file, --no-orphans, runtime/instance.js, agent]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      provision: {condition: service_completed_successfully}
+    networks: [data, agent-egress]
+    volumes:
+      - agent-config:/agent-config:ro
+      - type: volume
+        source: data
+        target: /data/workspaces
+        volume: {subpath: workspaces, nocopy: true}
+      - type: volume
+        source: data
+        target: /data/observability
+        volume: {subpath: observability, nocopy: true}
+      - type: volume
+        source: data
+        target: /data/agent-logs
+        volume: {subpath: agent-logs, nocopy: true}
+      - type: volume
+        source: data
+        target: /data/tmp/agent
+        volume: {subpath: tmp/agent, nocopy: true}
+    healthcheck:
+      test: [CMD, bun, --no-env-file, runtime/instance.js, agent-health]
+      interval: 5s
+      timeout: 4s
+      start_period: 3m
+      retries: 5
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  agent-config: {}
+
+networks:
+  agent-egress: {}

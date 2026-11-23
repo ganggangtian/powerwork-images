@@ -1,0 +1,84 @@
+# Load after the Agent and Studio/Worker overlays.
+services:
+  prepare:
+    volumes:
+      - edge-config:/edge-config
+      - plugin-config:/plugin-config
+  provision:
+    volumes:
+      - edge-config:/edge-config
+      - plugin-config:/plugin-config
+  platform:
+    environment:
+      POWERXI_EXTERNAL_GATEWAY_ORIGIN: http://gateway:4100
+      POWERXI_EXTERNAL_PLUGIN_ORIGIN: http://plugin:4108
+    ports: !reset []
+    networks: [frontend, data, studio-rpc, edge-rpc, plugin-rpc]
+  agent:
+    networks: [data, agent-egress, edge-rpc]
+  studio:
+    networks: [studio-rpc, edge-rpc]
+  postgres:
+    networks: [data, plugin-db]
+  gateway:
+    image: ${POWERXI_IMAGE:?Set POWERXI_IMAGE}
+    command: [bun, --no-env-file, runtime/instance.js, gateway]
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [frontend, edge-rpc]
+    volumes:
+      - edge-config:/edge-config:ro
+    ports:
+      - '${POWERXI_BIND_ADDRESS:-127.0.0.1}:${POWERXI_HOST_PORT:?Set POWERXI_HOST_PORT}:4100'
+    depends_on:
+      provision: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, bun, --no-env-file, runtime/instance.js, gateway-health]
+      interval: 5s
+      timeout: 4s
+      start_period: 3m
+      retries: 5
+    restart: unless-stopped
+  plugin:
+    image: ${POWERXI_IMAGE:?Set POWERXI_IMAGE}
+    command: [bun, --no-env-file, runtime/instance.js, plugin]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [plugin-rpc, plugin-db]
+    volumes:
+      - plugin-config:/plugin-config:ro
+      - type: volume
+        source: data
+        target: /data/plugins
+        read_only: true
+        volume: {subpath: plugins, nocopy: true}
+    depends_on:
+      provision: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4108/health',{signal:AbortSignal.timeout(2000)}).then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      start_period: 3m
+      retries: 5
+    restart: unless-stopped
+    stop_grace_period: 40s
+
+volumes:
+  edge-config: {}
+  plugin-config: {}
+
+networks:
+  edge-rpc:
+    internal: true
+  plugin-rpc:
+    internal: true
+  plugin-db:
+    internal: true

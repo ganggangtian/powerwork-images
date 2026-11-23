@@ -1,0 +1,11 @@
+name: ${POWERXI_INSTANCE_NAME:?Set POWERXI_INSTANCE_NAME}
+
+include:
+  - path:
+      - compose/compose.yaml
+      - compose/compose.product.yaml
+      - compose/compose.agent.yaml
+      - compose/compose.agent-bubblewrap.yaml
+      - compose/compose.studio-worker.yaml
+      - compose/compose.edge.yaml
+    project_directory: .

@@ -1,0 +1,19 @@
+services:
+  prepare:
+    environment:
+      POWERXI_PRODUCT_URL: http://product:4103
+  product:
+    image: ${POWERXI_PRODUCT_IMAGE:?Set POWERXI_PRODUCT_IMAGE}
+    init: true
+    depends_on:
+      platform: {condition: service_healthy}
+    environment:
+      POWERXI_API_URL: http://platform:4102
+    networks: [frontend]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4103/',{redirect:'manual'}).then(r=>process.exit(r.status<500?0:1),()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    restart: unless-stopped

@@ -1,0 +1,4 @@
+services:
+  agent:
+    security_opt:
+      - seccomp:${POWERXI_BUBBLEWRAP_PROFILE:?Set an absolute path to the generated seccomp profile}

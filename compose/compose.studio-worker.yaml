@@ -1,0 +1,75 @@
+services:
+  prepare:
+    volumes:
+      - studio-config:/studio-config
+      - worker-config:/worker-config
+      - worker-status:/worker-status
+  provision:
+    volumes:
+      - studio-config:/studio-config
+      - worker-config:/worker-config
+      - worker-status:/worker-status
+  platform:
+    environment:
+      POWERXI_EXTERNAL_STUDIO_ORIGIN: http://studio:4101
+      POWERXI_EXTERNAL_WORKER: 'true'
+    volumes:
+      - worker-status:/worker-status:ro
+    networks: [frontend, data, studio-rpc]
+  studio:
+    image: ${POWERXI_IMAGE:?Set POWERXI_IMAGE}
+    command: [bun, --no-env-file, runtime/instance.js, studio]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec
+      - /opt/powerxi/services/studio/apps/studio/.next/cache:rw,nosuid,nodev,noexec,uid=1000,gid=1000,mode=0700
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [studio-rpc]
+    volumes:
+      - studio-config:/studio-config:ro
+    depends_on:
+      provision: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4101/admin/login',{signal:AbortSignal.timeout(2000)}).then(r=>process.exit(r.status===200?0:1),()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      start_period: 3m
+      retries: 5
+    restart: unless-stopped
+  worker:
+    image: ${POWERXI_IMAGE:?Set POWERXI_IMAGE}
+    command: [bun, --no-env-file, --no-orphans, runtime/instance.js, worker]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks: [data, worker-egress]
+    volumes:
+      - worker-config:/worker-config:ro
+      - worker-status:/worker-status
+    depends_on:
+      provision: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, bun, --no-env-file, runtime/instance.js, worker-health]
+      interval: 5s
+      timeout: 4s
+      start_period: 3m
+      retries: 5
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  studio-config: {}
+  worker-config: {}
+  worker-status: {}
+
+networks:
+  studio-rpc:
+    internal: true
+  worker-egress: {}
